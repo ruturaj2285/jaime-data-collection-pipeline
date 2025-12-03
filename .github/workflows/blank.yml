@@ -25,6 +25,7 @@ on:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
     branches:
+      - main
       - develop/**
       - release/**
       - hotfixes/**
@@ -94,13 +95,20 @@ jobs:
       - id: filter
         name: Filter Changed Components
         run: |
-          ENV="${{ steps.set-env.outputs.environment }}"
+            CHANGED="${{ steps.changes.outputs.all_changed_files }}"
+            ENV="${{ steps.set-env.outputs.environment }}"
+      
+            # If CHANGED is not a JSON array, convert it into one
+            if [[ "$CHANGED" != "["* ]]; then
+              CHANGED="[\"$CHANGED\"]"
+            fi
+      
+            FUNCTIONS=$(echo "$CHANGED" | jq '[.[] | select(startsWith("functions/"))]')
+            WORKFLOWS=$(echo "$CHANGED" | jq "[.[] | select(startsWith(\"step-function-workflow/${ENV}\"))]")
+      
+            echo "functions=${FUNCTIONS}" >> $GITHUB_OUTPUT
+            echo "workflows=${WORKFLOWS}" >> $GITHUB_OUTPUT
 
-          FUNCTIONS=$(echo '${{ steps.changes.outputs.all_changed_files }}' | jq -r '[.[] | select(startswith("functions/"))]')
-          WORKFLOWS=$(echo '${{ steps.changes.outputs.all_changed_files }}' | jq -r "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
-
-          echo "functions=${FUNCTIONS}" >> $GITHUB_OUTPUT
-          echo "workflows=${WORKFLOWS}" >> $GITHUB_OUTPUT
 
 
   #########################################################################
