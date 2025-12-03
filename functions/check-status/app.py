@@ -14,6 +14,7 @@ def lambda_handler(event, context):
     
     # 3. Print the number
     print(f"Trigger Count: {new_value}")
+    print("123")
     
     # 4. Save new value back to SSM
     ssm.put_parameter(
@@ -23,3 +24,4 @@ def lambda_handler(event, context):
     )
     
     return {"count": new_value}
+
