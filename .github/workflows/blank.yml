@@ -10,16 +10,11 @@ on:
       dry-run:
         description: "Enable dry-run mode"
         type: boolean
-        required: false
         default: false
       environment:
         description: "Environment for dry-run"
         type: choice
-        required: false
-        options:
-          - development
-          - staging
-          - production
+        options: [development, staging, production]
 
   push:
     tags:
@@ -34,15 +29,15 @@ on:
       - step-function-workflow/**
 
 env:
-  ### Final ENV selection logic (same as your CI)
-  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development') 
+  # FINAL ENV LOGIC
+  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development')
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
 
-  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging') 
-      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/')) 
+  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging')
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/'))
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
 
-  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production') 
+  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production')
       || (!inputs.dry-run && github.ref_type == 'tag') }}
 
 jobs:
@@ -61,8 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+
       #################################################################
-      # Step 1 — Determine environment using your exact CI logic
+      # Step 1 — Determine environment using your CI logic
       #################################################################
       - id: set-env
         name: Determine Environment
@@ -78,6 +74,7 @@ jobs:
             exit 1
           fi
 
+
       #################################################################
       # Step 2 — Detect changed files
       #################################################################
@@ -89,26 +86,31 @@ jobs:
             functions/**
             step-function-workflow/**
 
+
       #################################################################
-      # Step 3 — Filter functions vs workflows based on detected env
+      # Step 3 — Filter changed components (FIXED jq)
       #################################################################
       - id: filter
         name: Filter Changed Components
         run: |
-            CHANGED="${{ steps.changes.outputs.all_changed_files }}"
-            ENV="${{ steps.set-env.outputs.environment }}"
-      
-            # If CHANGED is not a JSON array, convert it into one
-            if [[ "$CHANGED" != "["* ]]; then
-              CHANGED="[\"$CHANGED\"]"
-            fi
-      
-            FUNCTIONS=$(echo "$CHANGED" | jq '[.[] | select(startsWith("functions/"))]')
-            WORKFLOWS=$(echo "$CHANGED" | jq "[.[] | select(startsWith(\"step-function-workflow/${ENV}\"))]")
-      
-            echo "functions=${FUNCTIONS}" >> $GITHUB_OUTPUT
-            echo "workflows=${WORKFLOWS}" >> $GITHUB_OUTPUT
+          RAW="${{ steps.changes.outputs.all_changed_files }}"
+          ENV="${{ steps.set-env.outputs.environment }}"
 
+          echo "RAW input: $RAW"
+
+          # Ensure RAW is a JSON array
+          if [[ "$RAW" != "["* ]]; then
+            RAW="[\"$RAW\"]"
+          fi
+
+          echo "Normalized JSON: $RAW"
+
+          # jq uses lowercase startswith()
+          FUNCTIONS=$(echo "$RAW" | jq '[.[] | select(startswith("functions/"))]')
+          WORKFLOWS=$(echo "$RAW" | jq "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+
+          echo "functions=${FUNCTIONS}" >> $GITHUB_OUTPUT
+          echo "workflows=${WORKFLOWS}" >> $GITHUB_OUTPUT
 
 
   #########################################################################
@@ -128,6 +130,7 @@ jobs:
           echo "Functions:    ${{ needs.detect_changes.outputs.functions }}"
           echo "Workflows:    ${{ needs.detect_changes.outputs.workflows }}"
 
+
       #################################################################
       # Deploy Lambdas
       #################################################################
@@ -136,9 +139,10 @@ jobs:
         run: |
           echo '${{ needs.detect_changes.outputs.functions }}' | jq -r '.[]' | while read f; do
             ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
-            echo "Deploying Lambda: $ROOT"
+            echo "🔥 Deploying Lambda: $ROOT"
             bash scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
           done
+
 
       #################################################################
       # Deploy Step Functions
@@ -147,6 +151,6 @@ jobs:
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
           echo '${{ needs.detect_changes.outputs.workflows }}' | jq -r '.[]' | while read w; do
-            echo "Deploying Step Function: $w"
+            echo "⚙️ Deploying Step Function: $w"
             bash scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
           done
