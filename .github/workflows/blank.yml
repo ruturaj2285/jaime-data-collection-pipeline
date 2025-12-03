@@ -144,11 +144,20 @@ jobs:
       - name: Deploy Lambdas
         if: ${{ needs.detect_changes.outputs.functions != '[]' }}
         run: |
-          echo '${{ needs.detect_changes.outputs.functions }}' | jq -r '.[]' | while read f; do
-            ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
-            echo "➡ Deploying Lambda: $ROOT"
-            bash scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
-          done
+          echo "FUNCTIONS JSON:"
+          echo '${{ needs.detect_changes.outputs.functions }}'
+
+          echo '${{ needs.detect_changes.outputs.functions }}' \
+            | jq -r '.[]' \
+            | while read f; do
+
+              echo "Processing Lambda: $f"
+
+              ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
+              echo "➡ Deploying Lambda: $ROOT"
+
+              bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
+            done
 
       #################################################################
       # Deploy Step Functions
@@ -156,7 +165,14 @@ jobs:
       - name: Deploy Step Functions
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
-          echo '${{ needs.detect_changes.outputs.workflows }}' | jq -r '.[]' | while read w; do
-            echo "➡ Deploying Step Function: $w"
-            bash scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
-          done
+          echo "WORKFLOWS JSON:"
+          echo '${{ needs.detect_changes.outputs.workflows }}'
+
+          echo '${{ needs.detect_changes.outputs.workflows }}' \
+            | jq -r '.[]' \
+            | while read w; do
+
+              echo "➡ Deploying Step Function: $w"
+
+              bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
+            done
