@@ -1,36 +1,144 @@
-# This is a basic workflow to help you get started with Actions
+name: Jaime-DataCollection
 
-name: CI
+permissions:
+  id-token: write
+  contents: read
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Enable dry-run mode"
+        type: boolean
+        required: false
+        default: false
+      environment:
+        description: "Environment for dry-run"
+        type: choice
+        required: false
+        options:
+          - development
+          - staging
+          - production
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+    branches:
+      - develop/**
+      - release/**
+      - hotfixes/**
+    paths:
+      - functions/**
+      - step-function-workflow/**
+
+env:
+  ### Final ENV selection logic (same as your CI)
+  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development') 
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
+
+  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging') 
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/')) 
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
+
+  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production') 
+      || (!inputs.dry-run && github.ref_type == 'tag') }}
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  #########################################################################
+  # 1) DETECT ENVIRONMENT + CHANGES
+  #########################################################################
+  detect_changes:
+    name: Detect Environment + Changed Components
     runs-on: ubuntu-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      functions: ${{ steps.filter.outputs.functions }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      #################################################################
+      # Step 1 — Determine environment using your exact CI logic
+      #################################################################
+      - id: set-env
+        name: Determine Environment
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          if [ "${{ env.IS_DEV }}" = "true" ]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          elif [ "${{ env.IS_STAGING }}" = "true" ]; then
+            echo "environment=stg" >> $GITHUB_OUTPUT
+          elif [ "${{ env.IS_PROD }}" = "true" ]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Unable to determine environment"
+            exit 1
+          fi
+
+      #################################################################
+      # Step 2 — Detect changed files
+      #################################################################
+      - id: changes
+        uses: tj-actions/changed-files@v46.0.1
+        with:
+          dir_names: true
+          files: |
+            functions/**
+            step-function-workflow/**
+
+      #################################################################
+      # Step 3 — Filter functions vs workflows based on detected env
+      #################################################################
+      - id: filter
+        name: Filter Changed Components
+        run: |
+          ENV="${{ steps.set-env.outputs.environment }}"
+
+          FUNCTIONS=$(echo '${{ steps.changes.outputs.all_changed_files }}' | jq -r '[.[] | select(startswith("functions/"))]')
+          WORKFLOWS=$(echo '${{ steps.changes.outputs.all_changed_files }}' | jq -r "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+
+          echo "functions=${FUNCTIONS}" >> $GITHUB_OUTPUT
+          echo "workflows=${WORKFLOWS}" >> $GITHUB_OUTPUT
+
+
+  #########################################################################
+  # 2) DEPLOY ONLY THE CHANGED FUNCTIONS + WORKFLOWS
+  #########################################################################
+  deploy:
+    name: Deploy Only Changed Items
+    needs: detect_changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print Detected Info
+        run: |
+          echo "Environment:  ${{ needs.detect_changes.outputs.environment }}"
+          echo "Functions:    ${{ needs.detect_changes.outputs.functions }}"
+          echo "Workflows:    ${{ needs.detect_changes.outputs.workflows }}"
+
+      #################################################################
+      # Deploy Lambdas
+      #################################################################
+      - name: Deploy Lambdas
+        if: ${{ needs.detect_changes.outputs.functions != '[]' }}
+        run: |
+          echo '${{ needs.detect_changes.outputs.functions }}' | jq -r '.[]' | while read f; do
+            ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
+            echo "Deploying Lambda: $ROOT"
+            bash scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
+          done
+
+      #################################################################
+      # Deploy Step Functions
+      #################################################################
+      - name: Deploy Step Functions
+        if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
+        run: |
+          echo '${{ needs.detect_changes.outputs.workflows }}' | jq -r '.[]' | while read w; do
+            echo "Deploying Step Function: $w"
+            bash scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
+          done
