@@ -113,8 +113,12 @@ jobs:
           FUNCTIONS=$(echo "$FILES" | jq '[.[] | select(startswith("functions/"))]')
           WORKFLOWS=$(echo "$FILES" | jq "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
 
-          echo "functions=${FUNCTIONS}" >> $GITHUB_OUTPUT
-          echo "workflows=${WORKFLOWS}" >> $GITHUB_OUTPUT
+            SAFE_FUNCTIONS=$(echo "$FUNCTIONS" | jq -c .)
+            SAFE_WORKFLOWS=$(echo "$WORKFLOWS" | jq -c .)
+            
+            echo "functions=$SAFE_FUNCTIONS" >> $GITHUB_OUTPUT
+            echo "workflows=$SAFE_WORKFLOWS" >> $GITHUB_OUTPUT
+
 
 
   #########################################################################
