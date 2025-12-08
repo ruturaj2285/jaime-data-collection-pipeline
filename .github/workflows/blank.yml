@@ -88,7 +88,8 @@ jobs:
           echo "FILES JSON: $FILES"
 
           # ENV specific filtering (NO trailing slash because dir_names=true)
-          WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+          # WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+          WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}/data-collection/\")) | select(endswith(\".json\"))]")
           # FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
 
           echo "Sanitized WORKFLOWS: $WORKFLOWS"
