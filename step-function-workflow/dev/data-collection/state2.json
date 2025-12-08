@@ -1,5 +1,5 @@
 {
-  "Comment": "POC - DynamoDB Lock + 3 Parallel Lambdas",
+  "Comment": "POC12 - DynamoDB Lock + 3 Parallel Lambdas",
   "StartAt": "AcquireLock",
   "States": {
     "AcquireLock": {
