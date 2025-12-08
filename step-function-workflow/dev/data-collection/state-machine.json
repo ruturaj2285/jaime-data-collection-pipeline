@@ -1,5 +1,5 @@
 {
-  "Comment": "POC - DynamoDB Lock + Map(3 Lambdas123)",
+  "Comment": "POC123 - DynamoDB Lock + Map(3 Lambdas123)",
   "StartAt": "AcquireLock",
   "States": {
     "AcquireLock": {
@@ -105,4 +105,5 @@
     }
   }
 }
+
 
