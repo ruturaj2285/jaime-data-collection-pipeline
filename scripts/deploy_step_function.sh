@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-WORKFLOW_PATH=$1   # e.g., step-function-workflow/dev/data-pipeline
-ENVIRONMENT=$2     # dev | stg | prod
+WORKFLOW_PATH="$1"   # e.g., step-function-workflow/dev/data-pipeline
+ENVIRONMENT="$2"     # dev | stg | prod
 
 if [ -z "$WORKFLOW_PATH" ] || [ -z "$ENVIRONMENT" ]; then
   echo "Usage: deploy_step_function.sh <workflow-path> <env>"
@@ -27,10 +27,10 @@ echo " Environment: $ENVIRONMENT"
 echo "──────────────────────────────────────────────"
 
 # Validate JSON (optional but recommended)
-jq empty "$STATE_FILE" 2>/dev/null || { 
+if ! jq empty "$STATE_FILE" 2>/dev/null; then
   echo "❌ ERROR: Invalid JSON in $STATE_FILE"
   exit 1
-}
+fi
 
 # Deploy to AWS Step Functions
 aws stepfunctions update-state-machine \
