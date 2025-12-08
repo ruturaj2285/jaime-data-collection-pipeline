@@ -155,7 +155,7 @@ jobs:
       
                 # Deploy to AWS
                 aws stepfunctions update-state-machine \
-                  --state-machine-name "$STATE_MACHINE_NAME" \
+                  --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:update-through-pipeline" \
                   --definition "file://${STATE_FILE}"
       
                 echo "Updated → $STATE_MACHINE_NAME"
