@@ -36,7 +36,7 @@ env:
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
 
   IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production')
-      || (!inputs.dry-run && github.ref_type == 'tag') }}
+      || (!inputs.dy-run && github.ref_type == 'tag') }}
 
 jobs:
   detect_changes:
@@ -52,6 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Determine Environment
       - id: set-env
         run: |
           if [ "${{ env.IS_DEV }}" = "true" ]; then
@@ -65,6 +66,7 @@ jobs:
             exit 1
           fi
 
+      # Detect Changed Files
       - id: changes
         uses: tj-actions/changed-files@v46.0.1
         with:
@@ -73,6 +75,7 @@ jobs:
             functions/**
             step-function-workflow/**
 
+      # Environment-Based Filtering
       - id: filter
         run: |
           ENV="${{ steps.set-env.outputs.environment }}"
@@ -80,24 +83,29 @@ jobs:
 
           echo "RAW changed: $RAW"
 
-          # Convert newline-separated to JSON array
+          # Convert newline-separated output to JSON array
           FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
           echo "FILES JSON: $FILES"
 
-          # ENV specific filtering
-          WORKFLOWS=$(echo "$FILES" | jq "[.[] | select(startswith(\"step-function-workflow/${ENV}/\"))]")
-          FUNCTIONS=$(echo "$FILES" | jq "[.[] | select(startswith(\"functions/${ENV}/\"))]")
+          # ENV specific filtering (NO trailing slash because dir_names=true)
+          WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+          FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
 
-          echo "functions=$FUNCTIONS" >> $GITHUB_OUTPUT
-          echo "workflows=$WORKFLOWS" >> $GITHUB_OUTPUT
+          echo "Sanitized WORKFLOWS: $WORKFLOWS"
+          echo "Sanitized FUNCTIONS: $FUNCTIONS"
 
-          # Skip logic: no matching files for this environment
+          # Safe output to GitHub
+          printf "functions=%s\n" "$FUNCTIONS" >> $GITHUB_OUTPUT
+          printf "workflows=%s\n" "$WORKFLOWS" >> $GITHUB_OUTPUT
+
+          # Skip logic: if no matching folders, skip deployment
           if [[ "$FUNCTIONS" == "[]" && "$WORKFLOWS" == "[]" ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
+  # Deploy Job (Runs Only When skip=false)
   deploy:
     needs: detect_changes
     runs-on: ubuntu-latest
@@ -111,6 +119,7 @@ jobs:
           echo "Functions:   ${{ needs.detect_changes.outputs.functions }}"
           echo "Workflows:   ${{ needs.detect_changes.outputs.workflows }}"
 
+      # Deploy Lambdas
       - name: Deploy Lambdas
         if: ${{ needs.detect_changes.outputs.functions != '[]' }}
         run: |
@@ -120,6 +129,7 @@ jobs:
                 bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
               done
 
+      # Deploy Step Functions
       - name: Deploy Step Functions
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
