@@ -27,7 +27,6 @@ on:
       - hotfixes/**
 
 env:
-  # AUTO SELECT ENVIRONMENT
   IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development')
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
 
@@ -45,8 +44,7 @@ jobs:
 
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
-      functions: ${{ steps.filter.outputs.functions }}
-      workflows: ${{ steps.filter.outputs.workflows }}
+      changed_jsons: ${{ steps.filter.outputs.changed_jsons }}
       skip: ${{ steps.filter.outputs.skip }}
 
     steps:
@@ -70,42 +68,28 @@ jobs:
       - id: changes
         uses: tj-actions/changed-files@v46.0.1
         with:
-          dir_names: true
           files: |
-            functions/**
             step-function-workflow/**
 
-      # Environment-Based Filtering
+      # Filter JSON files only
       - id: filter
         run: |
-          ENV="${{ steps.set-env.outputs.environment }}"
           RAW="${{ steps.changes.outputs.all_changed_files }}"
+          echo "RAW files: $RAW"
 
-          echo "RAW changed: $RAW"
-
-          # Convert newline-separated output to JSON array
           FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
-          echo "FILES JSON: $FILES"
 
-          # ENV specific filtering (NO trailing slash because dir_names=true)
-          WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
-          FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
+          CHANGED_JSONS=$(echo "$FILES" | jq -c "[.[] | select(endswith(\".json\"))]")
+          echo "Changed JSONs: $CHANGED_JSONS"
 
-          echo "Sanitized WORKFLOWS: $WORKFLOWS"
-          echo "Sanitized FUNCTIONS: $FUNCTIONS"
+          echo "changed_jsons=$CHANGED_JSONS" >> $GITHUB_OUTPUT
 
-          # Safe output to GitHub
-          printf "functions=%s\n" "$FUNCTIONS" >> $GITHUB_OUTPUT
-          printf "workflows=%s\n" "$WORKFLOWS" >> $GITHUB_OUTPUT
-
-          # Skip logic: if no matching folders, skip deployment
-          if [[ "$FUNCTIONS" == "[]" && "$WORKFLOWS" == "[]" ]]; then
+          if [[ "$CHANGED_JSONS" == "[]" ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-  # Deploy Job (Runs Only When skip=false)
   deploy:
     needs: detect_changes
     runs-on: ubuntu-latest
@@ -114,26 +98,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: |
-          echo "Environment: ${{ needs.detect_changes.outputs.environment }}"
-          echo "Functions:   ${{ needs.detect_changes.outputs.functions }}"
-          echo "Workflows:   ${{ needs.detect_changes.outputs.workflows }}"
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::227295996532:role/step-function-role2285
+          aws-region: ap-northeast-1
 
-      # Deploy Lambdas
-      - name: Deploy Lambdas
-        if: ${{ needs.detect_changes.outputs.functions != '[]' }}
+      - name: Update ONLY changed Step Functions
         run: |
-          echo '${{ needs.detect_changes.outputs.functions }}' \
-            | jq -r '.[]' | while read f; do
-                ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
-                bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
-              done
+          ENV="${{ needs.detect_changes.outputs.environment }}"
 
-      # Deploy Step Functions
-      - name: Deploy Step Functions
-        if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
-        run: |
-          echo '${{ needs.detect_changes.outputs.workflows }}' \
-            | jq -r '.[]' | while read w; do
-                bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
-              done
+          echo '${{ needs.detect_changes.outputs.changed_jsons }}' \
+            | jq -r '.[]' | while read JSON; do
+
+                echo "Changed JSON file: $JSON"
+
+                FILE_NAME=$(basename "$JSON" .json)
+                WF_PATH=$(dirname "$JSON")
+
+                STATE_MACHINE_NAME="${FILE_NAME}-${ENV}"
+
+                echo "Updating state machine: $STATE_MACHINE_NAME"
+                echo "Using JSON file: $JSON"
+
+                jq empty "$JSON"
+
+                ARN=$(aws stepfunctions list-state-machines \
+                    --query "stateMachines[?name=='${STATE_MACHINE_NAME}'].stateMachineArn" \
+                    --output text)
+
+                if [ -z "$ARN" ]; then
+                  echo "❌ State machine not found in AWS: ${STATE_MACHINE_NAME}"
+                  exit 1
+                fi
+
+                echo "Found ARN: $ARN"
+
+                aws stepfunctions update-state-machine \
+                  --state-machine-arn "$ARN" \
+                  --definition "file://${JSON}"
+
+                echo "✔ Successfully updated → $STATE_MACHINE_NAME"
+                echo ""
+            done
