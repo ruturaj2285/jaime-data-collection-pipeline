@@ -152,7 +152,7 @@ jobs:
             | jq -r '.[]' | while read WF_PATH; do
                 WF_NAME=$(basename "$WF_PATH")
                 STATE_MACHINE_NAME="${WF_NAME}-${{ needs.detect_changes.outputs.environment }}"
-                STATE_FILE="${WF_PATH}/state-machine.json"
+                STATE_FILE="${WF_PATH}/state-*.json"
                 echo "Updating $STATE_MACHINE_NAME using $STATE_FILE"
                 # Validate JSON
                 jq empty "$STATE_FILE"
