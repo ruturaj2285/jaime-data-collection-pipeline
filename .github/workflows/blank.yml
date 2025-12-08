@@ -74,13 +74,20 @@ jobs:
       # Filter JSON files only
       - id: filter
         run: |
+          ENV="${{ steps.set-env.outputs.environment }}"
           RAW="${{ steps.changes.outputs.all_changed_files }}"
-          echo "RAW files: $RAW"
+
+          echo "RAW changed: $RAW"
 
           FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
 
-          CHANGED_JSONS=$(echo "$FILES" | jq -c "[.[] | select(endswith(\".json\"))]")
-          echo "Changed JSONs: $CHANGED_JSONS"
+          # Detect JSONs that belong ONLY to this environment
+          CHANGED_JSONS=$(echo "$FILES" \
+              | jq -c "[.[] 
+                | select(endswith(\".json\")) 
+                | select(startswith(\"step-function-workflow/${ENV}\")) ]")
+
+          echo "Filtered (only ${ENV}) JSONs: $CHANGED_JSONS"
 
           echo "changed_jsons=$CHANGED_JSONS" >> $GITHUB_OUTPUT
 
@@ -89,6 +96,7 @@ jobs:
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
+
 
   deploy:
     needs: detect_changes
