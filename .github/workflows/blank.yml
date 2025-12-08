@@ -129,11 +129,34 @@ jobs:
       #           bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
       #         done
 
-      # Deploy Step Functions
-      - name: Deploy Step Functions
+      # # Deploy Step Functions
+      # - name: Deploy Step Functions
+      #   if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
+      #   run: |
+      #     echo '${{ needs.detect_changes.outputs.workflows }}' \
+      #       | jq -r '.[]' | while read w; do
+      #           bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
+      #         done
+
+      - name: Update Step Functions directly
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
           echo '${{ needs.detect_changes.outputs.workflows }}' \
-            | jq -r '.[]' | while read w; do
-                bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
-              done
+            | jq -r '.[]' | while read WF_PATH; do
+              
+                WF_NAME=$(basename "$WF_PATH")
+                STATE_MACHINE_NAME="${WF_NAME}-${{ needs.detect_changes.outputs.environment }}"
+                STATE_FILE="${WF_PATH}/state-machine.json"
+      
+                echo "Updating $STATE_MACHINE_NAME using $STATE_FILE"
+      
+                # Validate JSON
+                jq empty "$STATE_FILE"
+      
+                # Deploy to AWS
+                aws stepfunctions update-state-machine \
+                  --state-machine-name "$STATE_MACHINE_NAME" \
+                  --definition "file://${STATE_FILE}"
+      
+                echo "Updated → $STATE_MACHINE_NAME"
+            done
