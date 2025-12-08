@@ -45,7 +45,7 @@ jobs:
 
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
-      functions: ${{ steps.filter.outputs.functions }}
+      # functions: ${{ steps.filter.outputs.functions }}
       workflows: ${{ steps.filter.outputs.workflows }}
       skip: ${{ steps.filter.outputs.skip }}
 
@@ -89,13 +89,13 @@ jobs:
 
           # ENV specific filtering (NO trailing slash because dir_names=true)
           WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
-          FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
+          # FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
 
           echo "Sanitized WORKFLOWS: $WORKFLOWS"
-          echo "Sanitized FUNCTIONS: $FUNCTIONS"
+          # echo "Sanitized FUNCTIONS: $FUNCTIONS"
 
           # Safe output to GitHub
-          printf "functions=%s\n" "$FUNCTIONS" >> $GITHUB_OUTPUT
+          # printf "functions=%s\n" "$FUNCTIONS" >> $GITHUB_OUTPUT
           printf "workflows=%s\n" "$WORKFLOWS" >> $GITHUB_OUTPUT
 
           # Skip logic: if no matching folders, skip deployment
@@ -116,18 +116,18 @@ jobs:
 
       - run: |
           echo "Environment: ${{ needs.detect_changes.outputs.environment }}"
-          echo "Functions:   ${{ needs.detect_changes.outputs.functions }}"
+          # echo "Functions:   ${{ needs.detect_changes.outputs.functions }}"
           echo "Workflows:   ${{ needs.detect_changes.outputs.workflows }}"
 
       # Deploy Lambdas
-      - name: Deploy Lambdas
-        if: ${{ needs.detect_changes.outputs.functions != '[]' }}
-        run: |
-          echo '${{ needs.detect_changes.outputs.functions }}' \
-            | jq -r '.[]' | while read f; do
-                ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
-                bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
-              done
+      # - name: Deploy Lambdas
+      #   if: ${{ needs.detect_changes.outputs.functions != '[]' }}
+      #   run: |
+      #     echo '${{ needs.detect_changes.outputs.functions }}' \
+      #       | jq -r '.[]' | while read f; do
+      #           ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
+      #           bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
+      #         done
 
       # Deploy Step Functions
       - name: Deploy Step Functions
