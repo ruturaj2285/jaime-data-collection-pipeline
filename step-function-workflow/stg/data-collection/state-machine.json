@@ -4,11 +4,12 @@
   "chunkSizeMinutes": 5,
   "totalDurationMinutes": 60,
   "maxConcurrency": 3,
-  "dynamodbTable": "OfflineCollectionLimits123",
+  "dynamodbTable": "OfflineCollectionLimits1234",
   "timestamps": {
     "start": "2025-12-08T10:30:00Z",
     "end": "2025-12-08T11:30:00Z"
   }
 }
+
 
 
