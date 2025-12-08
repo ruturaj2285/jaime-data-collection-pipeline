@@ -1,5 +1,5 @@
 {
-  "Comment": "A simple123 demo state machine",
+  "Comment": "A simple1234 demo state machine",
   "StartAt": "HelloState",
   "States": {
     "HelloState": {
