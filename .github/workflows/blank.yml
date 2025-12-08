@@ -25,9 +25,6 @@ on:
       - develop/**
       - release/**
       - hotfixes/**
-    paths:
-      - functions/**
-      - step-function-workflow/**
 
 env:
   # AUTO SELECT ENVIRONMENT
@@ -50,6 +47,7 @@ jobs:
       environment: ${{ steps.set-env.outputs.environment }}
       functions: ${{ steps.filter.outputs.functions }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      skip: ${{ steps.filter.outputs.skip }}
 
     steps:
       - uses: actions/checkout@v4
@@ -86,16 +84,24 @@ jobs:
           FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
           echo "FILES JSON: $FILES"
 
-          # Filter based on ENV-specific folder
+          # ENV specific filtering
           WORKFLOWS=$(echo "$FILES" | jq "[.[] | select(startswith(\"step-function-workflow/${ENV}/\"))]")
           FUNCTIONS=$(echo "$FILES" | jq "[.[] | select(startswith(\"functions/${ENV}/\"))]")
 
           echo "functions=$FUNCTIONS" >> $GITHUB_OUTPUT
           echo "workflows=$WORKFLOWS" >> $GITHUB_OUTPUT
 
+          # Skip logic: no matching files for this environment
+          if [[ "$FUNCTIONS" == "[]" && "$WORKFLOWS" == "[]" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
   deploy:
     needs: detect_changes
     runs-on: ubuntu-latest
+    if: ${{ needs.detect_changes.outputs.skip == 'false' }}
 
     steps:
       - uses: actions/checkout@v4
