@@ -150,15 +150,16 @@ jobs:
         run: |
           echo '${{ needs.detect_changes.outputs.workflows }}' \
             | jq -r '.[]' | while read WF_PATH; do
-                WF_NAME=$(basename "$WF_PATH")
-                STATE_MACHINE_NAME="${WF_NAME}-${{ needs.detect_changes.outputs.environment }}"
-                STATE_FILE="${WF_PATH}/state-2.json"
-                echo "Updating $STATE_MACHINE_NAME using $STATE_FILE"
-                # Validate JSON
-                jq empty "$STATE_FILE"
-                # Deploy to AWS
+                 ENV="${{ needs.detect_changes.outputs.environment }}"
+                 echo "Searching JSON files inside: $WF_PATH"
+                 for STATE_FILE in "$WF_PATH"/*.json; do
+                 FILE_NAME=$(basename "$STATE_FILE" .json)
+                 STATE_MACHINE_NAME="${FILE_NAME}-${ENV}"
+                 echo "Updating $STATE_MACHINE_NAME using $STATE_FILE"
+                 jq empty "$STATE_FILE"
                 aws stepfunctions update-state-machine \
-                  --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:update-through-pipeline" \
+                  --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:${STATE_MACHINE_NAME}" \
                   --definition "file://${STATE_FILE}"
                 echo "Updated → $STATE_MACHINE_NAME"
             done
+          done    
