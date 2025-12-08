@@ -138,6 +138,13 @@ jobs:
       #           bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
       #         done
 
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::227295996532:role/step-function-role2285
+          aws-region: ap-northeast-1
+
       - name: Update Step Functions directly
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
