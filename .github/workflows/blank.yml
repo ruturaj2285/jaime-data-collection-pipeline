@@ -23,14 +23,18 @@ on:
       - release/**
       - hotfixes/**
 env:
+  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development') ||(!inputs.dry-run && ((github.event_name == 'pull_request' && startsWith(github.base_ref, 'develop')) ||(github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'develop')))) }}
+  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging') || (!inputs.dry-run && ((github.event_name == 'pull_request' && startsWith(github.base_ref, 'release')) || (github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'release')))) }}
+  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production') || (!inputs.dry-run && ((github.event_name == 'pull_request' && github.base_ref == 'main') || (github.ref_type == 'tag' && !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-qa')))) }}
+  
   # AUTO SELECT ENVIRONMENT
-  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development')
-      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
-  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging')
-      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/'))
-      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
-  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production')
-      || (!inputs.dy-run && github.ref_type == 'tag') }}
+  # IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development')
+  #     || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
+  # IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging')
+  #     || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/'))
+  #     || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
+  # IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production')
+  #     || (!inputs.dy-run && github.ref_type == 'tag') }}
 jobs:
   detect_changes:
     name: Detect Environment + Changed Components
