@@ -1,24 +1,22 @@
 name: Jaime-DataCollection
-
+ 
 permissions:
   id-token: write
   contents: read
-
+ 
 on:
   workflow_dispatch:
     inputs:
       dry-run:
-        description: "Enable dry-run mode"
         type: boolean
         default: false
       environment:
-        description: "Environment for dry-run"
         type: choice
-        options: 
+        options:
           - development
           - staging
           - production
-
+ 
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
@@ -27,43 +25,35 @@ on:
       - develop/**
       - release/**
       - hotfixes/**
-    paths:
-      - functions/**
-      - step-function-workflow/**
-
+ 
 env:
-  # FINAL ENV LOGIC (same as your CI)
+  # AUTO SELECT ENVIRONMENT
   IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development')
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
-
+ 
   IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging')
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/'))
       || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
-
+ 
   IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production')
-      || (!inputs.dry-run && github.ref_type == 'tag') }}
-
+      || (!inputs.dy-run && github.ref_type == 'tag') }}
+ 
 jobs:
-  #########################################################################
-  # 1) DETECT ENVIRONMENT + CHANGED ITEMS
-  #########################################################################
   detect_changes:
     name: Detect Environment + Changed Components
     runs-on: ubuntu-latest
-
+ 
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
-      functions: ${{ steps.filter.outputs.functions }}
+      # functions: ${{ steps.filter.outputs.functions }}
       workflows: ${{ steps.filter.outputs.workflows }}
-
+      skip: ${{ steps.filter.outputs.skip }}
+ 
     steps:
       - uses: actions/checkout@v4
-
-      #################################################################
-      # Determine ENV
-      #################################################################
+ 
+      # Determine Environment
       - id: set-env
-        name: Determine Environment
         run: |
           if [ "${{ env.IS_DEV }}" = "true" ]; then
             echo "environment=dev" >> $GITHUB_OUTPUT
@@ -72,13 +62,11 @@ jobs:
           elif [ "${{ env.IS_PROD }}" = "true" ]; then
             echo "environment=prod" >> $GITHUB_OUTPUT
           else
-            echo "::error::Unable to determine environment"
+            echo "::error::Cannot determine environment"
             exit 1
           fi
-
-      #################################################################
-      # Detect changed files
-      #################################################################
+ 
+      # Detect Changed Files
       - id: changes
         uses: tj-actions/changed-files@v46.0.1
         with:
@@ -86,93 +74,92 @@ jobs:
           files: |
             functions/**
             step-function-workflow/**
-
-      #################################################################
-      # Filter Components (NO ERRORS)
-      #################################################################
+ 
+      # Environment-Based Filtering
       - id: filter
-        name: Filter Changed Components
         run: |
-          RAW="${{ steps.changes.outputs.all_changed_files }}"
           ENV="${{ steps.set-env.outputs.environment }}"
-
-          echo "RAW input: $RAW"
-
-          # Convert RAW → valid JSON array
-          if [[ "$RAW" == "["* ]]; then
-            FILES="$RAW"
-          elif [[ -z "$RAW" ]]; then
-            FILES="[]"
+          RAW="${{ steps.changes.outputs.all_changed_files }}"
+ 
+          echo "RAW changed: $RAW"
+ 
+          # Convert newline-separated output to JSON array
+          FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
+          echo "FILES JSON: $FILES"
+ 
+          # ENV specific filtering (NO trailing slash because dir_names=true)
+          WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+          # FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
+ 
+          echo "Sanitized WORKFLOWS: $WORKFLOWS"
+          # echo "Sanitized FUNCTIONS: $FUNCTIONS"
+ 
+          # Safe output to GitHub
+          # printf "functions=%s\n" "$FUNCTIONS" >> $GITHUB_OUTPUT
+          printf "workflows=%s\n" "$WORKFLOWS" >> $GITHUB_OUTPUT
+ 
+          # Skip logic: if no matching folders, skip deployment
+          if [[ "$FUNCTIONS" == "[]" && "$WORKFLOWS" == "[]" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
           else
-            FILES="[\"$RAW\"]"
+            echo "skip=false" >> $GITHUB_OUTPUT
           fi
-
-          echo "FILES (normalized JSON): $FILES"
-
-          # Use lowercase startswith() — jq builtin
-          FUNCTIONS=$(echo "$FILES" | jq '[.[] | select(startswith("functions/"))]')
-          WORKFLOWS=$(echo "$FILES" | jq "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
-
-            SAFE_FUNCTIONS=$(echo "$FUNCTIONS" | jq -c .)
-            SAFE_WORKFLOWS=$(echo "$WORKFLOWS" | jq -c .)
-            
-            echo "functions=$SAFE_FUNCTIONS" >> $GITHUB_OUTPUT
-            echo "workflows=$SAFE_WORKFLOWS" >> $GITHUB_OUTPUT
-
-
-
-  #########################################################################
-  # 2) DEPLOY ONLY CHANGED ITEMS
-  #########################################################################
+ 
+  # Deploy Job (Runs Only When skip=false)
   deploy:
-    name: Deploy Only Changed Items
     needs: detect_changes
     runs-on: ubuntu-latest
-
+    if: ${{ needs.detect_changes.outputs.skip == 'false' }}
+ 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Print Detected Info
-        run: |
-          echo "Environment:     ${{ needs.detect_changes.outputs.environment }}"
-          echo "Changed Functions: ${{ needs.detect_changes.outputs.functions }}"
-          echo "Changed Workflows: ${{ needs.detect_changes.outputs.workflows }}"
-
-      #################################################################
+ 
+      - run: |
+          echo "Environment: ${{ needs.detect_changes.outputs.environment }}"
+          # echo "Functions:   ${{ needs.detect_changes.outputs.functions }}"
+          echo "Workflows:   ${{ needs.detect_changes.outputs.workflows }}"
+ 
       # Deploy Lambdas
-      #################################################################
-      - name: Deploy Lambdas
-        if: ${{ needs.detect_changes.outputs.functions != '[]' }}
-        run: |
-          echo "FUNCTIONS JSON:"
-          echo '${{ needs.detect_changes.outputs.functions }}'
-
-          echo '${{ needs.detect_changes.outputs.functions }}' \
-            | jq -r '.[]' \
-            | while read f; do
-
-              echo "Processing Lambda: $f"
-
-              ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
-              echo "➡ Deploying Lambda: $ROOT"
-
-              bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
-            done
-
-      #################################################################
-      # Deploy Step Functions
-      #################################################################
-      - name: Deploy Step Functions
+      # - name: Deploy Lambdas
+      #   if: ${{ needs.detect_changes.outputs.functions != '[]' }}
+      #   run: |
+      #     echo '${{ needs.detect_changes.outputs.functions }}' \
+      #       | jq -r '.[]' | while read f; do
+      #           ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
+      #           bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
+      #         done
+ 
+      # # Deploy Step Functions
+      # - name: Deploy Step Functions
+      #   if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
+      #   run: |
+      #     echo '${{ needs.detect_changes.outputs.workflows }}' \
+      #       | jq -r '.[]' | while read w; do
+      #           bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
+      #         done
+ 
+ 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::227295996532:role/step-function-role2285
+          aws-region: ap-northeast-1
+ 
+      - name: Update Step Functions directly
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
-          echo "WORKFLOWS JSON:"
-          echo '${{ needs.detect_changes.outputs.workflows }}'
-
           echo '${{ needs.detect_changes.outputs.workflows }}' \
-            | jq -r '.[]' \
-            | while read w; do
-
-              echo "➡ Deploying Step Function: $w"
-
-              bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
+            | jq -r '.[]' | while read WF_PATH; do
+                 ENV="${{ needs.detect_changes.outputs.environment }}"
+                 echo "Searching JSON files inside: $WF_PATH"
+                 for STATE_FILE in "$WF_PATH"/*.json; do
+                 FILE_NAME=$(basename "$STATE_FILE" .json)
+                 STATE_MACHINE_NAME="${FILE_NAME}-${ENV}"
+                 echo "Updating $STATE_MACHINE_NAME using $STATE_FILE"
+                 jq empty "$STATE_FILE"
+                aws stepfunctions update-state-machine \
+                  --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:${STATE_MACHINE_NAME}" \
+                  --definition "file://${STATE_FILE}"
+                echo "Updated → $STATE_MACHINE_NAME"
             done
+          done    
