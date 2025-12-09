@@ -127,7 +127,8 @@ jobs:
                  echo "Searching JSON files inside: $WF_PATH"
                  for STATE_FILE in "$WF_PATH"/*.json; do
                  FILE_NAME=$(basename "$STATE_FILE" .json)
-                 STATE_MACHINE_NAME="${FILE_NAME}-${ENV}"
+                 # STATE_MACHINE_NAME="${FILE_NAME}-${ENV}"
+                 STATE_MACHINE_NAME="JAIME_${ENV^}_$(basename "$STATE_FILE" .json)"
                  echo "Updating $STATE_MACHINE_NAME using $STATE_FILE"
                  jq empty "$STATE_FILE"
                 aws stepfunctions update-state-machine \
