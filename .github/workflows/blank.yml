@@ -1,154 +1,125 @@
 name: Jaime-DataCollection
- 
 permissions:
   id-token: write
   contents: read
- 
 on:
   workflow_dispatch:
     inputs:
       dry-run:
-        description: "Enable dry-run mode"
         type: boolean
-        required: false
         default: false
       environment:
-        description: "Environment for dry-run"
         type: choice
-        required: false
         options:
           - development
           - staging
           - production
- 
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
     branches:
-      - "develop/*"
-      - "release/*"
-    paths-ignore:
-      - .azure-pipelines/**
-      - .github/**
-      - README.md
-  pull_request:
-    branches:
-      - "develop/*"
-      - "release/*"
       - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-    paths-ignore:
-      - .azure-pipelines/**
-      - .github/**
-      - README.md
- 
+      - develop/**
+      - release/**
+      - hotfixes/**
 env:
-  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development') ||(!inputs.dry-run && ((github.event_name == 'pull_request' && startsWith(github.base_ref, 'develop')) ||(github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'develop')))) }}
-  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging') || (!inputs.dry-run && ((github.event_name == 'pull_request' && startsWith(github.base_ref, 'release')) || (github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'release')))) }}
-  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production') || (!inputs.dry-run && ((github.event_name == 'pull_request' && github.base_ref == 'main') || (github.ref_type == 'tag' && !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-qa')))) }}
-  
-
- 
+  # AUTO SELECT ENVIRONMENT
+  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development')
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/develop/')) }}
+  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging')
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/release/'))
+      || (!inputs.dry-run && startsWith(github.ref, 'refs/heads/hotfixes/')) }}
+  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production')
+      || (!inputs.dy-run && github.ref_type == 'tag') }}
 jobs:
   detect_changes:
     name: Detect Environment + Changed Components
     runs-on: ubuntu-latest
- 
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
+      # functions: ${{ steps.filter.outputs.functions }}
       workflows: ${{ steps.filter.outputs.workflows }}
       skip: ${{ steps.filter.outputs.skip }}
- 
     steps:
       - uses: actions/checkout@v4
- 
-      
+      # Determine Environment
       - id: set-env
         run: |
-          obj=$(echo '{}' | jq -r '
-            if env.IS_DEV == "true" then {
-              result: "development"
-            } elif env.IS_STAGING == "true" then {
-              result: "staging"
-            } elif env.IS_PROD == "true" then {
-              result: "production"
-            } else {}
-            end
-          ')
-
-          if [ "$obj" == "{}" ]; then
-            echo "::error::Environment is not selected."
+          if [ "${{ env.IS_DEV }}" = "true" ]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          elif [ "${{ env.IS_STAGING }}" = "true" ]; then
+            echo "environment=stg" >> $GITHUB_OUTPUT
+          elif [ "${{ env.IS_PROD }}" = "true" ]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Cannot determine environment"
             exit 1
           fi
-
-          echo "result=$(echo "$obj" | jq -r '.result')" >> $GITHUB_OUTPUT
-          echo "::group::GITHUB_OUTPUT:"
-          cat $GITHUB_OUTPUT
-          echo "::endgroup::"
- 
-      
+      # Detect Changed Files
       - id: changes
         uses: tj-actions/changed-files@v46.0.1
         with:
           dir_names: true
           files: |
+            functions/**
             step-function-workflow/**
- 
-      
+      # Environment-Based Filtering
       - id: filter
         run: |
           ENV="${{ steps.set-env.outputs.environment }}"
           RAW="${{ steps.changes.outputs.all_changed_files }}"
- 
           echo "RAW changed: $RAW"
-          
+          # Convert newline-separated output to JSON array
           FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
           echo "FILES JSON: $FILES"
-        
+          # ENV specific filtering (NO trailing slash because dir_names=true)
           WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
-       
+          # FUNCTIONS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"functions/${ENV}\"))]")
           echo "Sanitized WORKFLOWS: $WORKFLOWS"
-
+          # echo "Sanitized FUNCTIONS: $FUNCTIONS"
+          # Safe output to GitHub
+          # printf "functions=%s\n" "$FUNCTIONS" >> $GITHUB_OUTPUT
           printf "workflows=%s\n" "$WORKFLOWS" >> $GITHUB_OUTPUT
- 
-          if ["$WORKFLOWS" == "[]" ]; then
+          # Skip logic: if no matching folders, skip deployment
+          if [[ "$FUNCTIONS" == "[]" && "$WORKFLOWS" == "[]" ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Debug GitHub context
-        run: |
-           echo "event_name: ${{ github.event_name }}"
-           echo "event_action: ${{ github.event.action }}"
-           echo "ref:        ${{ github.ref }}"
-           echo "ref_type:   ${{ github.ref_type }}"
-           echo "ref_name:   ${{ github.ref_name }}"
-           echo "base_ref:   ${{ github.base_ref }}"
-           echo "head_ref:   ${{ github.head_ref }}"          
- 
-  
+  # Deploy Job (Runs Only When skip=false)
   deploy:
     needs: detect_changes
     runs-on: ubuntu-latest
     if: ${{ needs.detect_changes.outputs.skip == 'false' }}
- 
     steps:
       - uses: actions/checkout@v4
- 
       - run: |
           echo "Environment: ${{ needs.detect_changes.outputs.environment }}"
+          # echo "Functions:   ${{ needs.detect_changes.outputs.functions }}"
           echo "Workflows:   ${{ needs.detect_changes.outputs.workflows }}"
+      # Deploy Lambdas
+      # - name: Deploy Lambdas
+      #   if: ${{ needs.detect_changes.outputs.functions != '[]' }}
+      #   run: |
+      #     echo '${{ needs.detect_changes.outputs.functions }}' \
+      #       | jq -r '.[]' | while read f; do
+      #           ROOT=$(echo "$f" | awk -F/ '{print $1"/"$2}')
+      #           bash ./scripts/deploy_lambda.sh "$ROOT" "${{ needs.detect_changes.outputs.environment }}"
+      #         done
+      # # Deploy Step Functions
+      # - name: Deploy Step Functions
+      #   if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
+      #   run: |
+      #     echo '${{ needs.detect_changes.outputs.workflows }}' \
+      #       | jq -r '.[]' | while read w; do
+      #           bash ./scripts/deploy_step_function.sh "$w" "${{ needs.detect_changes.outputs.environment }}"
+      #         done
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::227295996532:role/step-function-role2285
           aws-region: ap-northeast-1
- 
       - name: Update Step Functions directly
         if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
         run: |
