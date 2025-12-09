@@ -43,11 +43,11 @@ jobs:
       - id: set-env
         run: |
           if [ "${{ env.IS_DEV }}" = "true" ]; then
-            echo "environment=development" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> $GITHUB_OUTPUT
           elif [ "${{ env.IS_STAGING }}" = "true" ]; then
-            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "environment=stg" >> $GITHUB_OUTPUT
           elif [ "${{ env.IS_PROD }}" = "true" ]; then
-            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "environment=prod" >> $GITHUB_OUTPUT
           else
             echo "::error::Cannot determine environment"
             exit 1
