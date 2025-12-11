@@ -37,7 +37,15 @@ jobs:
       # functions: ${{ steps.filter.outputs.functions }}
       workflows: ${{ steps.filter.outputs.workflows }}
       skip: ${{ steps.filter.outputs.skip }}
+      
+
+      
     steps:
+
+      - uses: actions/checkout@v4
+        with:
+           fetch-depth: 0
+           
       - uses: actions/checkout@v4
       # Determine Environment
       - id: set-env
