@@ -9,7 +9,7 @@
         "TableName": "sf-lock-table",
         "Key": {
           "LockName": {
-            "S": "MySemapddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddhore"
+            "S": "MySere"
           }
         },
         "ExpressionAttributeNames": {
@@ -105,6 +105,7 @@
     }
   }
 }
+
 
 
 
