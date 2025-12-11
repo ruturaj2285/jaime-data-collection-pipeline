@@ -1,0 +1,29 @@
+{
+  "Comment": "A simple1234 demo state machine",
+  "StartAt": "HelloState",
+  "States": {
+    "HelloState": {
+      "Type": "Pass",
+      "Result": "Hello from Step Functions!",
+      "Next": "CheckNumber"
+    },
+    "CheckNumber": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.num",
+          "NumericGreaterThan": 10,
+          "Next": "GreaterThanTen"
+        }
+      ],
+      "Default": "LessOrEqualTen"
+    },
+    "GreaterThanTen": {
+      "Type": "Succeed"
+    },
+    "LessOrEqualTen": {
+      "Type": "Fail",
+      "Cause": "Number is too small"
+    }
+  }
+}
