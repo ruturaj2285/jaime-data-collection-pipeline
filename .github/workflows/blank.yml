@@ -65,7 +65,7 @@ jobs:
       - id: changes
         uses: tj-actions/changed-files@v46.0.1
         with:
-          dir_names: true
+          dir_names: false
           files: |
             functions/**
             step-function-workflow/**
