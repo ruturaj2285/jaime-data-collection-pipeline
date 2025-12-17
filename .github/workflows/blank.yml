@@ -1,4 +1,5 @@
 name: Jaime-DataCollection
+
 permissions:
   id-token: write
   contents: read
@@ -25,10 +26,34 @@ on:
       - release/**
       - hotfixes/**
 
+  pull_request:
+    branches:
+      - develop/**
+      - release/**
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
 env:
-  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development') || (!inputs.dry-run && ((github.event_name == 'pull_request' && startsWith(github.base_ref, 'develop')) || (github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'develop')))) }}
-  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging') || (!inputs.dry-run && ((github.event_name == 'pull_request' && startsWith(github.base_ref, 'release')) || (github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'release')))) }}
-  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production') || (!inputs.dry-run && ((github.event_name == 'pull_request' && github.base_ref == 'main') || (github.ref_type == 'tag' && !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-qa')))) }}
+  IS_DEV: ${{ (inputs.dry-run && inputs.environment == 'development') ||
+    (!inputs.dry-run && (
+      (github.event_name == 'pull_request' && startsWith(github.base_ref, 'develop')) ||
+      (github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'develop'))
+    )) }}
+
+  IS_STAGING: ${{ (inputs.dry-run && inputs.environment == 'staging') ||
+    (!inputs.dry-run && (
+      (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release')) ||
+      (github.event_name == 'push' && github.ref_type == 'branch' && startsWith(github.ref_name, 'release'))
+    )) }}
+
+  IS_PROD: ${{ (inputs.dry-run && inputs.environment == 'production') ||
+    (!inputs.dry-run && (
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.ref_type == 'tag' && !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-qa'))
+    )) }}
 
 jobs:
   detect_changes:
@@ -40,60 +65,69 @@ jobs:
       skip: ${{ steps.filter.outputs.skip }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/checkout@v4
-
-      - id: set-env
+      - name: Detect Environment
+        id: set-env
         run: |
           if [ "${{ env.IS_DEV }}" = "true" ]; then
-            echo "environment=dev" >> $GITHUB_OUTPUT
+            ENV="dev"
           elif [ "${{ env.IS_STAGING }}" = "true" ]; then
-            echo "environment=stg" >> $GITHUB_OUTPUT
+            ENV="stg"
           elif [ "${{ env.IS_PROD }}" = "true" ]; then
-            echo "environment=prod" >> $GITHUB_OUTPUT
+            ENV="prod"
           else
             echo "::error::Cannot determine environment"
             exit 1
           fi
 
-      - id: changes
-        uses: tj-actions/changed-files@v46.0.1
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "::notice::Detected environment: $ENV"
+
+      - name: Detect changed files
+        id: changes
+        uses: tj-actions/changed-files@v46
         with:
-          dir_names: false
           files: |
             functions/**
             step-function-workflow/**
 
-      - id: filter
+      - name: Filter step function workflows
+        id: filter
         run: |
           ENV="${{ steps.set-env.outputs.environment }}"
-          RAW="${{ steps.changes.outputs.all_changed_files }}"
-          FILES=$(printf '%s\n' "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
+          RAW='${{ steps.changes.outputs.all_changed_files }}'
 
+          FILES=$(echo "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
           WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
 
-          printf "workflows=%s\n" "$WORKFLOWS" >> $GITHUB_OUTPUT
+          echo "workflows=$WORKFLOWS" >> $GITHUB_OUTPUT
 
-          if [[ "$WORKFLOWS" == "[]" ]]; then
+          if [ "$WORKFLOWS" == "[]" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::No workflow changes detected"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
+            echo "::notice::Detected workflows: $WORKFLOWS"
           fi
 
   deploy:
+    name: Deploy Step Functions
     needs: detect_changes
     runs-on: ubuntu-latest
     if: ${{ needs.detect_changes.outputs.skip == 'false' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - run: |
-          echo "Environment: ${{ needs.detect_changes.outputs.environment }}"
-          echo "Workflows:   ${{ needs.detect_changes.outputs.workflows }}"
+      - name: Show deployment context
+        run: |
+          echo "Environment : ${{ needs.detect_changes.outputs.environment }}"
+          echo "Workflows   : ${{ needs.detect_changes.outputs.workflows }}"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -101,57 +135,38 @@ jobs:
           role-to-assume: arn:aws:iam::227295996532:role/step-function-role2285
           aws-region: ap-northeast-1
 
-      - name: Update Step Functions directly
-        if: ${{ needs.detect_changes.outputs.workflows != '[]' }}
+      - name: Update Step Functions
         run: |
           echo '${{ needs.detect_changes.outputs.workflows }}' \
-            | jq -r '.[]' | while read WF_PATH; do
-                ENV="${{ needs.detect_changes.outputs.environment }}"
+          | jq -r '.[]' | while read WF_PATH; do
 
-                echo "Processing: $WF_PATH"
+            ENV="${{ needs.detect_changes.outputs.environment }}"
 
-                # ------------------------------
-                # CASE 1: WF_PATH is a JSON FILE
-                # ------------------------------
-                if [ -f "$WF_PATH" ]; then
-                    STATE_FILE="$WF_PATH"
-                    FILE_NAME=$(basename "$STATE_FILE" .json)
-                    STATE_MACHINE_NAME="JAIME_${ENV^}_${FILE_NAME}"
+            echo "::group::Processing $WF_PATH"
 
-                    echo "Updating (file) → $STATE_MACHINE_NAME"
+            if [ -f "$WF_PATH" ]; then
+              FILE_NAME=$(basename "$WF_PATH" .json)
+              STATE_MACHINE_NAME="JAIME_${ENV^}_${FILE_NAME}"
 
-                    aws stepfunctions update-state-machine \
-                      --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:${STATE_MACHINE_NAME}" \
-                      --definition "file://${STATE_FILE}"
+              aws stepfunctions update-state-machine \
+                --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:${STATE_MACHINE_NAME}" \
+                --definition "file://${WF_PATH}"
 
-                    echo "✓ Updated $STATE_MACHINE_NAME"
-                    continue
-                fi
+              echo "✓ Updated $STATE_MACHINE_NAME"
+            elif [ -d "$WF_PATH" ]; then
+              for STATE_FILE in "$WF_PATH"/*.json; do
+                FILE_NAME=$(basename "$STATE_FILE" .json)
+                STATE_MACHINE_NAME="JAIME_${ENV^}_${FILE_NAME}"
 
-                # --------------------------------
-                # CASE 2: WF_PATH is a DIRECTORY
-                # --------------------------------
-                if [ -d "$WF_PATH" ]; then
-                    echo "Searching JSON files inside directory: $WF_PATH"
+                aws stepfunctions update-state-machine \
+                  --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:${STATE_MACHINE_NAME}" \
+                  --definition "file://${STATE_FILE}"
 
-                    for STATE_FILE in "$WF_PATH"/*.json; do
-                        FILE_NAME=$(basename "$STATE_FILE" .json)
-                        STATE_MACHINE_NAME="JAIME_${ENV^}_${FILE_NAME}"
+                echo "✓ Updated $STATE_MACHINE_NAME"
+              done
+            else
+              echo "::warning::Invalid path: $WF_PATH"
+            fi
 
-                        echo "Updating (directory) → $STATE_MACHINE_NAME"
-
-                        aws stepfunctions update-state-machine \
-                          --state-machine-arn "arn:aws:states:ap-northeast-1:227295996532:stateMachine:${STATE_MACHINE_NAME}" \
-                          --definition "file://${STATE_FILE}"
-
-                        echo "✓ Updated $STATE_MACHINE_NAME"
-                    done
-                    continue
-                fi
-
-                # ------------------------------
-                # CASE 3: INVALID PATH
-                # ------------------------------
-                echo "::warning::Path is not file or directory: $WF_PATH"
-
+            echo "::endgroup::"
           done
