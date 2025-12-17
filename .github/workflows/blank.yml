@@ -95,24 +95,51 @@ jobs:
             functions/**
             step-function-workflow/**
 
+      # - name: Filter step function workflows
+      #   id: filter1
+      #   run: |
+      #     ENV="${{ steps.set-env.outputs.environment }}"
+      #     RAW='${{ steps.changes.outputs.all_changed_files }}'
+
+      #     FILES=$(echo "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
+      #     WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
+
+      #     echo "workflows=$WORKFLOWS" >> $GITHUB_OUTPUT
+
+      #     if [ "$WORKFLOWS" == "[]" ]; then
+      #       echo "skip=true" >> $GITHUB_OUTPUT
+      #       echo "::notice::No workflow changes detected"
+      #     else
+      #       echo "skip=false" >> $GITHUB_OUTPUT
+      #       echo "::notice::Detected workflows: $WORKFLOWS"
+      #     fi
+
       - name: Filter step function workflows
         id: filter
         run: |
           ENV="${{ steps.set-env.outputs.environment }}"
-          RAW='${{ steps.changes.outputs.all_changed_files }}'
-
-          FILES=$(echo "$RAW" | jq -R -s -c 'split("\n") | map(select(. != ""))')
-          WORKFLOWS=$(echo "$FILES" | jq -c "[.[] | select(startswith(\"step-function-workflow/${ENV}\"))]")
-
+      
+          # tj-actions output is SPACE-separated
+          RAW="${{ steps.changes.outputs.all_changed_files }}"
+      
+          # Convert to proper JSON array
+          FILES=$(printf '%s\n' $RAW | jq -R -s -c 'split("\n") | map(select(. != ""))')
+      
+          # Keep ONLY current environment workflows
+          WORKFLOWS=$(echo "$FILES" | jq -c \
+            "[.[] | select(startswith(\"step-function-workflow/${ENV}/\"))]"
+          )
+      
           echo "workflows=$WORKFLOWS" >> $GITHUB_OUTPUT
-
+      
           if [ "$WORKFLOWS" == "[]" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "::notice::No workflow changes detected"
+            echo "::notice::No ${ENV} workflow changes detected"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
-            echo "::notice::Detected workflows: $WORKFLOWS"
+            echo "::notice::Detected ${ENV} workflows: $WORKFLOWS"
           fi
+
 
   deploy:
     name: Deploy Step Functions
